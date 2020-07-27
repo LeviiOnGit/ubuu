@@ -1,0 +1,95 @@
+<!DOCTYPE HTML>
+<html>
+
+<head>
+    <title> Socket </title>
+    <!-- TODO download -->
+    <script src="/socket.io/socket.io.js"></script>
+
+    <script  src="/dist/main.js"></script>
+
+
+</head>
+
+<body>
+    
+       
+    <style>
+        body {
+            background-color: rgb(245, 222, 160);
+        }
+
+        .wrap {
+            width: 80vw;
+            border-style: solid;
+            padding: 1vw;
+            margin-bottom: 1vh;
+        }
+
+        #signText {
+            width: 100%;
+            height: 8vh;
+        }
+
+        #vrfyMsg {
+            width: 100%;
+            height: 8vh;
+        }
+
+        #vrfySign {
+            width: 100%;
+            height: 8vh;
+        }
+
+        #vrfyResult {
+            border-style: solid;
+            text-align: center;
+            padding: 1vh;
+        }
+
+        textarea {
+            resize: none;
+        }
+
+        .key {
+            width: 100%;
+            max-width: 80vw;
+            word-wrap: break-word;
+        }
+    </style>
+      <p id="threshold">Threshold: empty</p>
+      <p id="trustStatus">Diese Partei ist vertrauenswürdig</p>
+      <p>  <input type="button" id="corrupt" value="korrupt" >
+        <input type="button" id="trustworthy" value="vertrauenswürdig" > </p>
+    <div id="genDiv" class="wrap">
+        <h2>KeyGen</h2>
+        <p><input type="button" id="daBit" value="Generate Key" "> MPC version with DaBit function
+        </p>
+
+        <p><input type="button" id="keygen" value="Generate Key" > JS random, only for this client
+        </p>
+
+        <div id="pk" class="key"> Public Key: </div>
+        <div id="sk" class="key"> Secret Key: </div>
+    </div>
+    <div id="signDiv" class="wrap">
+        <h2>Sign</h2>
+        <p><input type="button" id="sign" value="sign" disabled >sign </p>
+        <p><textarea id="signText"></textarea>sign input </p>
+    </div>
+    <div id="vrfyDiv" class="wrap">
+        <h2>Verify</h2>
+        <p><input type="button" id="vrfy" value="Check Signature" > </p>
+
+        <p><textarea id="vrfyMsg"></textarea>Message </p>
+        <p><textarea id="vrfySign"></textarea>Signature</p>
+        <p><textarea class="key" id="vrfyPk"></textarea>Import Public Key (Optional) </p>
+        <div id="vrfyResult">unchecked</div>
+    </div>
+
+    <p><input type="button" id="curve" value="check Curve" >
+        <input type="button" id="test" value="test" > </p>
+       </p>
+</body>
+
+</html>

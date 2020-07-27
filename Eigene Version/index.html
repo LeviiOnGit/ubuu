@@ -1,0 +1,706 @@
+<!DOCTYPE HTML>
+<html>
+
+<head>
+    <title> Socket </title>
+    <!-- TODO download -->
+    <script src="/socket.io/socket.io.js"></script>
+   
+
+
+</head>
+
+<body>
+    <script>
+        var varid;
+        var q1;//number of valid parties 
+        var pk;//public key
+        var sk; //secret key
+        var t0, t1, t2, t3, t4, t5, t6, t7, t8,t9,t10,t11,t12,t13,tx;//zeitmessung
+        var p = 107;
+        var q = 116;//107;
+        var curveFactor = 15;//17;//edwards curve curvature
+        var basepoint = { x: 8, y: 15 };//generator
+
+        var delta; 
+        var binResult = [];
+        var qResult = [];
+        var socket = io();
+        var kiArr = [];
+        var daRepeats = 100;
+        var daOutputLength;
+        var sec = 128;
+        var bArr = [];
+        var currentMsg = "";
+        var sq;
+        var rq;
+        var keyGenAlone = false;
+
+
+
+
+        socket.on("init", function (data) {
+
+            console.log(data.id);
+            id = data.id;
+
+        });
+
+  socket.on("conUpdate", function (data) {
+
+            var thresholdP = document.getElementById("threshold");
+            q1 = data.counter;
+            delta = Math.floor(q / 3);//kleinste gruppe mit P1 = 3
+            thresholdP.innerHTML = "Threshold: " + data.threshold + "<br>"+data.trust+" Parteien von "+data.counter+" sind vertrauenswürdig.";
+            if (data.trust <= data.threshold) {//daBit nur möglich, wenn mehr trust. parteien als threshold
+                console.log("too small");
+                document.getElementById("daBit").disabled = true;
+            } else {
+                document.getElementById("daBit").disabled = false;
+            }
+        });
+        function corrupt(){//Partei wird korrupt
+            document.getElementById("trustStatus").innerHTML="Diese Partei ist korrupt";
+            socket.emit("corrupt");
+        }
+        function trustworthy(){//Partei wird vertrauenswürdig
+            document.getElementById("trustStatus").innerHTML="Diese Partei ist vertrauenswürdig";
+            socket.emit("trust");
+        }
+
+
+        //**********************************************DA BIT FUNCTIONS**********************************************
+        function daBit(m) { //generiert m random bits über alle parteien verteilt
+            document.getElementById("daBit").disabled=true;
+            t0 = performance.now();
+            console.log("DA BIT FUNKTION");
+
+            daRepeats = m + ((sec + 1) * sec);
+            for (var i = 1; i <= daRepeats; i++) { //generiert daRepeats mal random integer von 0 bis (q-1) 
+                var bShare = Math.floor(Math.random() * (q));
+                bArr[bArr.length] = (bShare);
+            }
+             console.log(bArr);
+            socket.emit("setp1"); //setzt p1 als eigene id auf dem server 
+            socket.emit("setOutputLength", m);
+            socket.emit("getShares", {// teilt input in q1 viele shares 
+                input: bArr,
+                base: (q),
+                dest: "biShares",
+            });
+            bArr = [];
+        }
+        socket.on("getOutputLength", function (data) {
+            daOutputLength = data;
+        });
+        socket.on("biShares", function (data) {
+            console.log("biShares");
+            var hijArr = [];
+            var inputArr = data;// share von bArr
+            for (var i = 0; i < inputArr.length; i++) { //berechnet hij mit formel bij = lij + delta * hij
+                var hij = 0;
+                var lij = 0;
+                var foundLij = false;
+                while (!foundLij) {
+                    hij++;
+                    lij = mod(inputArr[i] - (delta * hij), q);
+                    if (lij < delta && lij >= 0) {
+                        foundLij = true;
+                        hijArr[i] = (hij);
+                    }
+                }
+            }
+            socket.emit("getSum", {//sendet input als shares um mit dne shares anderer parteien zu addieren
+                input: hijArr,
+                base: (q),
+                dest: "hijSum",
+                toP1: true  //sendet nur an p1
+            });
+            socket.emit("getShares", {// splits input into q1 shares 
+                input: inputArr,
+                base: (q),
+                dest: "bijShares"
+            });
+        });
+        socket.on("hijSum", function (data) {   //nur p1 
+            console.log("hijSum");
+            inputArr = data;
+            for (var i = 0; i < inputArr.length; i++) { //berechnet ki von der formel ki= delta * hij / q wird für binaäre shares benötigt
+                kiArr[i] = (delta * inputArr[i]) / q;
+            }
+        });
+        socket.on("bijShares", function (data) {
+            console.log("bijShares");
+            socket.emit("getSum", {//sendet input als shares um mit dne shares anderer parteien zu addieren
+                input: data,
+                base: (q),
+                dest: "bijSum",
+            });
+        });
+        var bijArr = [];
+        socket.on("bijSum", function (data) {
+            console.log("bijSum");
+            bijArr[bijArr.length] = data;//speichert bij Shares von allen q1 parteien
+            console.log(q1);
+            if (bijArr.length >= q1) {//bij shares von allen parteien
+
+                var biOutputArr = bijArr[0].slice();
+
+                for (let i = 0; i < bijArr[0].length; i++) {//addiert bij Shares zusammen
+                    for (let j = 1; j < bijArr.length; j++) {
+                        biOutputArr[i] = (biOutputArr[i] + bijArr[j][i]) % q;
+                    }
+                }
+                console.log("Result:");
+                console.log(biOutputArr);
+
+                qResult = biOutputArr;
+                var bi = qResult;
+                biOutputArr = [];
+                bijArr = [];
+
+                if (kiArr.length >= daRepeats) {//wenn dieser client p1 ist
+                    var outputArr = [];
+                    for (let i = 0; i < kiArr.length; i++) {
+                        outputArr[i] = mod(Math.round(bi[i] - (kiArr[i] * q)), 2);// binäre version von bArr
+                    }
+
+                    socket.emit("getShares", {// teilt input in q1 viele shares 
+                        input: outputArr,
+                        base: 2,
+                        dest: "biBinShares",
+                    });
+                }
+            }
+        });
+        socket.on("biBinShares", function (data) {
+            console.log("biBinShares");
+            socket.emit("getShares", {// splits input into q1 shares 
+                input: data,
+                base: 2,
+                dest: "bijBinShares"
+            });
+        });
+        socket.on("bijBinShares", function (data) {
+            console.log("bijBinShares");
+            socket.emit("getSum", {//sendet input als shares um mit dne shares anderer parteien zu addieren
+                input: data,
+                base: 2,
+                dest: "bijBinSum"
+            });
+        });
+        var bijBinArr = [];
+        socket.on("bijBinSum", function (data) {
+            console.log("bijBinSum");
+            bijBinArr[bijBinArr.length] = data;
+
+            if (bijBinArr.length >= q1) { //alle parteien
+                var biBinOutputArr = bijBinArr[0].slice();
+
+                for (let i = 0; i < bijBinArr[0].length; i++) {// addiert bij Shares zu biBinArr
+                    for (let j = 1; j < bijBinArr.length; j++) {
+                        biBinOutputArr[i] = (biBinOutputArr[i] + bijBinArr[j][i]) % 2;
+                    }
+
+                }
+                console.log("BinResult: ");
+                console.log(biBinOutputArr);
+                binResult = biBinOutputArr;// bArr %2
+                biBinOutputArr = [];
+                bijBinArr = [];
+                fRand();
+            }
+
+        });
+        //**********************************************FRAND CHECK**********************************************
+        function fRand() {
+            var rArr = [];
+            for (var j = 0; j < sec; j++) {//erstellt Array mit random bits der größe [3][daOutputLength]
+                for (var i = 0; i < daRepeats; i++) {
+                    if (rArr[i] == undefined) {
+                        rArr[i] = [];
+                    }
+                    var r = Math.floor(Math.random() * 2);
+                    rArr[i][j] = r;
+                }
+            }
+            binShares = fRandShares(rArr, binResult, 2);
+            qShares = fRandShares(rArr, qResult, q);
+            socket.emit("fRandSum", {//sendet beide arrays zum vergleichen
+                binArr: binShares,
+                qArr: qShares,
+            });
+        }
+        function fRandShares(rArr, bArr, base) {//erstellt Array mit shares von rArr
+            var resultArr = [];
+            for (var j = 0; j < sec; j++) {
+                for (var i = 0; i < daRepeats; i++) {
+                    if (resultArr[j] == undefined) {
+                        resultArr[j] = 0;
+                    }
+                    resultArr[j] += (rArr[i][j] * bArr[i]) % base;
+                    resultArr[j] = resultArr[j] % base;
+                }
+            }
+            return resultArr;
+        }
+        socket.on("frandResult", function (data) {
+            console.log("RESULT: " + data.check);
+            if (data.check) {   //check war positiv
+                output = binResult.slice(0, daOutputLength);//kopiert die ersten 256 bits aus binResult
+                console.log(output);
+                var outputString = "";
+                for (let i = 0; i < output.length; i++) {
+                    outputString += output[i];
+
+                }
+                outputString = outputString.replace(",", "");
+                keyGen(outputString);
+            }
+            kiArr = []; //array reset
+            binResult = [];
+            qResult = [];
+            document.getElementById("daBit").disabled=false;
+        });
+
+
+        //**********************************************Signature Functions**********************************************
+        function keyGen(bitString) {           //KEYGEN
+            console.log("SIGNATUR ALGORITHMUS");
+            console.log("bitstring: " + bitString);
+            if (bitString == undefined) {//einzelner client ohne daBit
+                console.log("String from JS random");
+                keyGenAlone = true;
+                bitString = [];//secret key
+                for (var i = 0; i < 256; i++) {
+                    bitString += Math.floor(Math.random() * 2);
+                }
+            } else if (bitString.length == 256) {//MPC bitString vonm daBit
+                console.log("DEFINED from dabit");
+            }
+            document.getElementById("sk").innerHTML = "Secret Key: " + bitString;
+            socket.emit("hash", {
+                value: bitString,
+                dest: "keyGen"
+            });
+        }
+        socket.on("keyGen", function (data) {       
+            //mpc konvertiert bit 3-253bin zu mod q
+            hashedBits = data;
+            var sum = decodeInt(hashedBits, 3, 253, q)// bit 0-3 und 253 zu 0
+            sq = 2;
+            for (var i = 0; i < 254; i++) {
+                sq = (sq * 2) % q;
+            }
+            sq = (sq + sum) % q;//bit 254 zu 1
+            console.log("SQ: " + sq);
+            var myQ = multiplyPoint(basepoint.x, basepoint.y, sq);// point [sq]G
+            console.log("Punkt Q " + myQ.x + "|" + myQ.y);
+
+
+            pk = encodePoint(myQ.x, myQ.y, 256);
+
+            document.getElementById("pk").innerHTML = "Public Key: " + pk;
+            document.getElementById("sign").disabled = false;
+
+        });
+
+
+        function sign() {                           //SIGN**********************************************
+            console.log("sign");
+            currentMsg = document.getElementById("signText").value;//input aus UI
+            socket.emit("hash", {
+                value: currentMsg,
+                dest: "signMessage"
+            });
+        }
+        socket.on("signMessage", function (data) {
+
+
+            var hashR = hashedBits.substring(256);//erste hälfte von hashedBits
+            var input = hashR + data;
+            socket.emit("hash", {
+                value: input,
+                dest: "signR"
+            });
+        });
+        socket.on("signR", function (data) {
+            rq = "" + data;
+            rq = decodeInt(rq, 0, 512, q);
+            console.log("RQ: " + rq);
+            var myQ = multiplyPoint(basepoint.x, basepoint.y, rq);// point [rq]G
+            console.log("Punkt R " + myQ.x + "|" + myQ.y);
+            var myR = encodePoint(myQ.x, myQ.y, 256);
+            socket.emit("signResult", {
+                rq: "" + rq,
+                m: currentMsg,
+                sq: "" + sq,
+                q: "" + q,
+                pk: "" + pk,
+                r: myR
+            });
+        });
+        socket.on("signFinal", function (data) {
+            bigS = data.s
+            var sqString = encodeInt(data.s, 256);
+            console.log("Signature:" + data.r + "" + sqString);//fertige signatur
+            document.getElementById("vrfySign").value = data.r + "" + sqString
+            document.getElementById("vrfyMsg").value = currentMsg;
+        });
+        var sigHalf2;
+        var sigHalf1;
+        var pointR;
+        function verify() {  	                //VERIFY**********************************************
+            var m = "" + document.getElementById("vrfyMsg").value;
+            var sig = "" + document.getElementById("vrfySign").value;
+
+            if (sig.length == 512) {
+                sigHalf1 = sig.substring(0, (sig.length / 2));
+                sigHalf2 = (sig.substring(sig.length / 2, sig.length));
+
+                var vrfyPK = document.getElementById("vrfyPk").value;
+
+                if (!(vrfyPK.length > 0)) {//benutzt generierten pk
+                    vrfyPK = pk;
+                } else if (vrfyPK.length == 256) {//benutzt importierten pk
+                    console.log("VERIFY WITH IMPORTED PUBLIC KEY");
+                } else {
+                    alert("Imported Public Key not valid!");
+                }
+
+                if (vrfyPK == undefined) {
+                    alert("No Public Key found!")
+                } else {
+                    socket.emit("vrfyResult", {
+                        pointR: sigHalf1,
+                        pk: vrfyPK,
+                        m: m,
+                        dest: "verifyHash"
+                    });
+                }
+            } else {
+                alert("Signatur muss 512 stellen haben.")
+            }
+        }
+        socket.on("verifyHash", function (data) {
+            console.log("verifyHash")
+            var hashData = data.hashData;
+            var sumT = decodeInt(hashData, 0, hashData.length, q);  
+            var intSsum = decodeInt(sigHalf2, 0, sigHalf2.length, q);
+
+            pointR = decodePoint(sigHalf1);//basepoint * rq
+            pointR = multiplyPoint(pointR.x, pointR.y, 8);
+
+            pointPk = decodePoint(data.pk); //basepoint * sq
+            pointPk = multiplyPoint(pointPk.x, pointPk.y, 8 * sumT);
+
+            var verifyPoint = multiplyPoint(basepoint.x, basepoint.y, intSsum * 8); //[2^{3}*S]G
+            var tempCheckPoint = addPoints(pointR.x, pointR.y, pointPk.x, pointPk.y);   //[2^{3}]R+[2^{3}*t]PK
+
+            console.log(verifyPoint.x + "|" + verifyPoint.y + " should be " + tempCheckPoint.x + "|" + tempCheckPoint.y);
+            var resultDiv = document.getElementById("vrfyResult");
+
+            if (verifyPoint.x == tempCheckPoint.x && verifyPoint.y == tempCheckPoint.y) {   //verified
+                resultDiv.innerHTML = "Signature is valid";
+                resultDiv.style.backgroundColor = "green";
+            } else {                                            //nicht verified
+                resultDiv.innerHTML = "Signature is invalid";
+                resultDiv.style.backgroundColor = "red";
+            }
+        });
+      
+        //**********************************************Edwards Curve Functions**********************************************
+
+        function multiplyPoint(xinput, yinput, index) {
+            if (index == 0) {
+                return { x: 0, y: 1 };//neutrales element
+            } else if (index == 1) {
+                return { x: xinput, y: yinput };
+            } else {
+                var output;
+                var tempPoint = { x: xinput, y: yinput };
+                var binIndex = reverseString("" + Number(index).toString(2));
+                for (var i = 0; i < binIndex.length; i++) {
+                    if (binIndex[i] == "1") {// wenn stelle i von binIndex 1 ist
+                        if (output == undefined) {//beim ersten durchgang
+                            output = tempPoint;
+                        } else {    
+                            output = addPoints(output.x, output.y, tempPoint.x, tempPoint.y);// output wird mit tempPoint addiert
+                        }
+                    }
+                    tempPoint = addPoints(tempPoint.x, tempPoint.y, tempPoint.x, tempPoint.y);  //verdoppelt punkt mit jedem durchgang
+                }
+                return output;
+            }
+        }
+        function addPoints(x1, y1, x2, y2) {
+            // Algorithmus von https://tools.ietf.org/html/draft-josefsson-eddsa-ed25519-03#section-4.1 5.4 Point Addition
+            //Funktion entspricht:
+            //(x3|y3) = ((x1*x2+x2*y1/1+curveFacotr*x1*x2*y1*y2) | (y1*y2-x1*x2/1-d*x1*x2*y1*y2))
+            var z1 = 1;
+            var z2 = 1;
+
+            a = mod(z1 * z2, p);
+            b = mod(a * a, p);
+            c = mod(x1 * x2, p);
+            d = mod(y1 * y2, p);
+            e = mod(curveFactor * c * d, p);
+            f = mod(b - e, p);
+            g = mod(b + e, p);
+            h = mod((x1 + y1) * (x2 + y2), p);
+
+            x3 = mod(a * f * (h - c - d), p);
+            y3 = mod(a * g * (d - c), p);
+            z3 = mod(f * g, p);
+            if (mod(z3, p) == 0) {
+                console.log("BAD ONE!");
+            }
+
+            var newPoint = { x: (modDivide(mod(x3, p), mod(z3, p), p)), y: mod(modDivide(mod(y3, p), mod(z3, p), p), p) };
+            return newPoint;
+        }
+        function checkOnCurve(x, y) {//überprüft gültigkeit des Punktes mit Edwardskurven Formel x^2+y^2=^+curveFactor*x^2*y^2
+            part1 = mod((x * x) + (y * y), p);
+            part2 = mod(1 + (curveFactor * (x * x) * (y * y)), p);
+            if (part1 == part2) {
+                console.log(x + "---" + y);
+            }
+
+            return part1 == part2;
+        }
+        function modDivide(a, b, modulo) {
+            var inverse = modInverse(b, modulo);
+            if (b == 1) {
+                return a;
+            }
+            if (inverse == 1) {
+                console.log("NOT DEFINED");
+            } else if (inverse != undefined) {
+                return (a * inverse) % modulo;
+            }
+        }
+        function modInverse(a1, b1) {
+            //Erweiterter Euklidischer Algorithmus von http://www.doc.ic.ac.uk/~mrh/330tutor/ch03.html
+            var a, b, x;
+            if (a1 == 0 || b1 == 0) {
+                console.log("INVERSE OF 0");
+                return 0;
+            }
+            if (a1 > b1) {// teilt durch größere zahl
+                a = a1;
+                b = b1;
+            } else {
+                a = b1;
+                b = a1;
+            }
+            var remaind;
+            invXArr = [0, 1];
+            invQArr = [];
+            var counter = 0;
+            var check = false;
+
+            while (check == false) {
+                if (remaind == 0) {
+                    check = true;
+                } else {
+                    var div = Math.floor(a / b);
+                    var remaind = a % b;
+                    invQArr[counter] = div;
+                }
+                a = b;
+                b = remaind;
+
+
+                if (counter >= 3) {
+                    var x = (invXArr[counter - 3] - (invXArr[counter - 2] * invQArr[counter - 3]));
+                    invXArr[counter - 1] = x;
+                }
+                counter++;
+            }
+            if (counter >= 3) {
+                var x = (invXArr[counter - 3] - (invXArr[counter - 2] * invQArr[counter - 3]));
+
+                invXArr[counter - 1] = x;
+
+                return (mod(invXArr[counter - 1], p));
+            }
+        }
+        function decodeInt(bitString, start, end, modulo) {// bitstring zu integer (little endian) 
+            var sum = 0;
+            for (var i = start; i < end; i++) {
+                sum = (sum + (Math.pow(2, i) % modulo) * (bitString[i])) % modulo;
+            }
+            return sum;
+        }
+        function encodeInt(input, length) {//integer zu bitstring (little endian)
+
+            var bin = Number(input).toString(2);
+            if (bin.length < length) {
+                while (bin.length < length) {
+                    bin = "0" + bin;
+                }
+            }
+            bin = reverseString("" + bin);
+            return bin;
+        }
+        function encodePoint(x, y, length) {//punkt zu bitstring
+            endianX = encodeInt(x, length);
+            endianY = encodeInt(y, length);
+            var output = endianY.substring(0, length - 8) + endianX[0] + endianY.substring(length - 7);
+            return output;
+        }
+        function decodePoint(input) {//bitstring zu punkt
+            var x0 = (input[input.length - 8]);
+            var yString = input.substring(0, input.length - 1) + "" + 0;
+            yString = yString.substring(0, input.length - 8) + "" + 0 + yString.substring(input.length - 7);
+
+            var y = decodeInt(yString, 0, 256, p);
+            var x = getXfromY(y);
+
+
+            if (!(x % 2 == x0)) {
+                x = p - x;
+            }
+            var outputPoint = { x: x, y: y };
+            return outputPoint;
+        }
+        function getXfromY(y) {//valide x koordinate zu y wert, so das x|y ein valider punkt ist.
+            //funktion von https://tools.ietf.org/html/draft-josefsson-eddsa-ed25519-03#section-4.1
+            var u = mod((y * y) - 1, p);
+            var v = mod(curveFactor * (y * y) - 1, p);
+
+            var xx = mod(modDivide(u, v, p), p);
+
+            var pp = ((p - 1) / 2);
+            var tempxx = xx;
+
+            if ((Math.pow((xx), (pp))) % p == 1) {
+                var tempInt = modDivide(pp + 1, 2, p);
+            } else {
+                var tempInt = modDivide(p + 1, 4, p);
+            }
+            var x = xx;
+            for (var i = 1; i < tempInt; i++) {
+                x = (x * xx) % p;
+            }
+            return x;
+        }
+        function reverseString(str) {
+            var newStr = "";
+            for (var i = str.length; i >= 0; i--) {
+                newStr += str.charAt(i);
+            }
+            return newStr;
+        }
+        function mod(x, mod) {   //normales Javascript modulo funktioniert nicht bei negativen zahlen
+            return ((x % mod) + mod) % mod;
+        }
+        function checkCurveValues() {//hilfsfunktion zur kurve, kein einfluss auf die funktionalität
+            var testArr = [];
+            for (var i = 0; i < p; i++) {//ermittelt valide punkte auf der kurve
+                for (var j = 0; j < p; j++) {
+                    if (checkOnCurve(i, j)) {
+                        console.log(i + "|" + j);
+                        var point = { x: i, y: j };
+                        testArr[testArr.length] = point;
+                    }
+                }
+            }
+            var sqareArr = [];
+            for (let i = 0; i < p; i++) {// überprüft valide werde für curveFactor, da dieser keine quadrat in p sein darf
+                sqareArr[sqareArr.length] = (i * i) % p;
+            }
+            factorArr = [];
+            for (let i = 0; i < p; i++) {
+                if (!sqareArr.includes(i)) {
+                    factorArr[factorArr.length] = i;
+                }
+            }
+            console.log("possible point (with current p and curve factor): ");
+            console.log(testArr);
+            if (p % 4 != 3) {
+                console.log("p%4 should be 3")
+            }
+            console.log("q should be: " + testArr.length);// ermittelt q
+            console.log("curve factor can be " + factorArr);
+        }
+
+
+    </script>
+    <style>
+        body {
+            background-color: rgb(245, 222, 160);
+        }
+
+        .wrap {
+            width: 80vw;
+            border-style: solid;
+            padding: 1vw;
+            margin-bottom: 1vh;
+        }
+
+        #signText {
+            width: 100%;
+            height: 8vh;
+        }
+
+        #vrfyMsg {
+            width: 100%;
+            height: 8vh;
+        }
+
+        #vrfySign {
+            width: 100%;
+            height: 8vh;
+        }
+
+        #vrfyResult {
+            border-style: solid;
+            text-align: center;
+            padding: 1vh;
+        }
+
+        textarea {
+            resize: none;
+        }
+
+        .key {
+            width: 100%;
+            max-width: 80vw;
+            word-wrap: break-word;
+        }
+    </style>
+    <p id="threshold">Threshold: empty</p>
+    <p id="trustStatus">Diese Partei ist vertrauenswürdig</p>
+    <p> <input type="button" id="corrupt" value="korrupt" onclick="corrupt()">
+    <input type="button" id="trustworthy" value="vertrauenswürdig" onclick="trustworthy()"></p>
+    <div id="genDiv" class="wrap">
+        <h2>KeyGen</h2>
+        <p><input type="button" id="daBit" value="Generate Key" onclick="daBit(256)"> MPC version with DaBit function
+        </p>
+
+        <p><input type="button" id="keygen" value="Generate Key" onclick="keyGen()"> JS random, only for this client
+        </p>
+
+        <div id="pk" class="key"> Public Key: </div>
+        <div id="sk" class="key"> Secret Key: </div>
+    </div>
+    <div id="signDiv" class="wrap">
+        <h2>Sign</h2>
+        <p><input type="button" id="sign" value="sign" disabled onclick="sign()">sign </p>
+        <p><textarea id="signText"></textarea>sign input </p>
+    </div>
+    <div id="vrfyDiv" class="wrap">
+        <h2>Verify</h2>
+        <p><input type="button" id="vrfy" value="Check Signature" onclick="verify()"> </p>
+
+        <p><textarea id="vrfyMsg"></textarea>Message </p>
+        <p><textarea id="vrfySign"></textarea>Signature</p>
+        <p><textarea class="key" id="vrfyPk"></textarea>Import Public Key (Optional) </p>
+        <div id="vrfyResult">unchecked</div>
+    </div>
+
+    <p><input type="button" id="curve" value="check curve" onclick="checkCurveValues()"></p>
+</body>
+
+</html>
